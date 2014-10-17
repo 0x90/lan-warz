@@ -2,11 +2,6 @@
 # -*- encoding: utf-8 -*-
 #
 
-__author__ = '090h'
-__license__ = 'GPL'
-
-from sys import argv, exit
-from os import path
 from scapy.all import *
 
 def arp_display(pkt):
