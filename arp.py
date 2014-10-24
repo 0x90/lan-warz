@@ -12,12 +12,13 @@ conf.verb = 0
 # basic requirements
 from os import path, geteuid
 from subprocess import Popen, PIPE
-from platform import system
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
 from pprint import pprint
 import signal
+
+# external dependencies
 from ipcalc import Network
-import netifaces
+from netifaces import ifaddresses
 # netifaces.ifaddresses('lo0')
 
 
@@ -36,7 +37,7 @@ def table():
             if "IP address" in line:
                 continue
             (ip, hw, flags, address, mogl, dev) = line.split()
-            res[hw] = ip
+            res[address] = ip
         return res
         # return [line.strip().split() for line in file("/proc/net/arp").readlines()]
     elif DARWIN:
@@ -63,8 +64,8 @@ def originalMAC(ip):
 
 # sending ARP scan
 def scan(target):
-    # res,unans = srp(Ether(dst="ff:ff:ff:ff:ff:ff")/ARP(pdst=target))
-    return srp(Ether(dst="ff:ff:ff:ff:ff:ff") / ARP(pdst=target))[0]
+    return srp(Ether(dst="ff:ff:ff:ff:ff:ff")/ARP(pdst=target))
+    # return srp(Ether(dst="ff:ff:ff:ff:ff:ff") / ARP(pdst=target))[0]
 
 
 # ARP scan summary
@@ -86,12 +87,16 @@ def ping(host, timeout=2, verbose=False):
 
 
 def arp_handler(pkt):
+    if not pkt.haslayer(ARP):
+        return
     pkt.sprintf("%ARP.hwsrc% %ARP.psrc%")
     if pkt[ARP].op == 1:  # who-has (request)
         print("Request: " + pkt[ARP].psrc + " is asking about " + pkt[ARP].pdst)
     if pkt[ARP].op == 2:  # is-at (response)
         print("*Response: " + pkt[ARP].hwsrc + " has address " + pkt[ARP].psrc)
 
+
+def arp_handler_advanced(pkt):
     MACtest = []
     pktTime = []
     detectTimer = 0
@@ -129,16 +134,11 @@ def arp_handler(pkt):
 
 
 def monitor(func=None):
-    #
-    # sniff(prn=arp_monitor_callback, filter="arp", store=0)
-    # sniff(store=0, filter='arp', prn=monitor, iface="wlan0")
+    print('Starting ARP monitor')
     if func is None:
-        return sniff(prn=arp_handler, filter="arp", store=0,)
+        return sniff(prn=arp_handler, filter="arp", )
     else:
-        # print(.summary())
         return sniff(filter="arp")
-    #sniff(prn=func, filter="arp", store=0,)
-    # print(sniff(prn=func, filter="arp", store=0, count=10))
 
 
 ################################## ATTACKS #############################################
@@ -160,6 +160,7 @@ def poison_old():
 
     packet = Ether() / ARP(op="who-has", hwsrc=my_mac, psrc=sys.argv[2], pdst=sys.argv[1])
     sendp(packet)
+
 
 def restore(routerIP, victimIP, routerMAC, victimMAC):
     send(ARP(op=2, pdst=routerIP, psrc=victimIP, hwdst="ff:ff:ff:ff:ff:ff", hwsrc=victimMAC), count=3)
@@ -190,6 +191,7 @@ def arp_spoof(routerIP, victimIP):
         poison(routerIP, victimIP, routerMAC, victimMAC)
         time.sleep(1.5)
 
+
 def flood():
     while 1:
         dest_mac = RandMAC()
@@ -203,7 +205,7 @@ def set_static_mac(ip, mac):
 
 
 def auto_discovery():
-    from interfaces import get_network_mask
+
 
     for iface in get_if_list():
         try:
@@ -235,11 +237,20 @@ def main():
         exit("[!] Please run as root")
 
 
-
 if __name__ == '__main__':
     # main()
-    print(monitor())
-    # arp_summary()
-    # pprint(table())
+    print('ARP table:')
+    pprint(table())
+
+    # monitor()
+    # print(arping('192.168.90.1/24').summary())
+
+    print('ARP discovery...')
+    # ans, unans=srp(Ether(dst="ff:ff:ff:ff:ff:ff")/ARP(pdst="192.168.1.0/24"), timeout=2)
+    ans, unans = arping('192.168.90.1/24')
+
+    ans.summary(lambda (s, r): r.sprintf("%Ether.src% %ARP.psrc%") )
+    # arp_summary('192.168.90.1/24')
+    #
     # pprint(auto_discovery())
     # pprint(arp_cahe)

