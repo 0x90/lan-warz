@@ -10,6 +10,8 @@ from datetime import datetime
 from time import sleep
 from threading import Thread
 import logging
+
+# http://stackoverflow.com/questions/12601316/how-to-make-python-requests-work-via-socks-proxy
 from requesocks import get
 # from requests import get
 
